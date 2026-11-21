@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RealityMap · 国内数据源版</title>
+<link rel="stylesheet" href="vendor/leaflet.css">
+<style>
+  :root {
+    --bg: #1e222a; --panel: #262b35; --panel2: #2d333f; --line: #3a4150;
+    --txt: #d7dce4; --dim: #8a93a3; --acc: #4f8cff; --warn: #e8a33d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font: 13px/1.5 "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--txt); }
+  #map { position: absolute; inset: 0; background: #141820; }
+  .leaflet-container { background: #141820; }
+
+  /* 左侧参数面板（对齐原站布局） */
+  #panel {
+    position: absolute; top: 10px; left: 10px; bottom: 10px; width: 330px; z-index: 1000;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,.4);
+  }
+  #panel header { padding: 10px 14px; border-bottom: 1px solid var(--line); font-weight: 600; font-size: 14px; display: flex; justify-content: space-between; align-items: center; }
+  #panel header .ver { color: var(--dim); font-size: 11px; font-weight: 400; }
+  #body { flex: 1; overflow-y: auto; padding: 10px 14px 14px; }
+  #body::-webkit-scrollbar { width: 8px; } #body::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+
+  .sec { margin-bottom: 14px; }
+  .sec h3 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; margin: 0 0 6px; }
+  .row { display: flex; gap: 8px; margin: 4px 0; align-items: center; }
+  .row label { flex: 0 0 96px; color: var(--dim); }
+  .row input[type=number], .row input[type=text], .row select {
+    flex: 1; min-width: 0; background: var(--panel2); border: 1px solid var(--line); color: var(--txt);
+    border-radius: 5px; padding: 4px 7px; font: inherit; height: 28px;
+    -moz-appearance: textfield; appearance: textfield;
+  }
+  .row input[type=number]::-webkit-outer-spin-button,
+  .row input[type=number]::-webkit-inner-spin-button {
+    -webkit-appearance: none; margin: 0;            /* 去掉 number 输入框的默认上下箭头 */
+  }
+  .row input:focus, .row select:focus { outline: none; border-color: var(--acc); }
+  .row select {
+    -webkit-appearance: none; appearance: none;      /* 去掉 select 默认下拉箭头 */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0h8L4 5z' fill='%238a93a3'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 8px center; padding-right: 24px;
+    cursor: pointer;
+  }
+  .hint { color: var(--dim); font-size: 11px; margin: 3px 0 0; }
+  .kv { display: flex; justify-content: space-between; margin: 2px 0; font-size: 12px; }
+  .kv b { color: var(--acc); font-weight: 600; }
+
+  .btns { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+  .btns.col { flex-direction: column; align-items: stretch; }
+  button {
+    background: var(--panel2); color: var(--txt); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 12px; cursor: pointer; font: inherit;
+  }
+  button:hover { border-color: var(--acc); }
+  button.primary { background: var(--acc); border-color: var(--acc); color: #fff; }
+  button.primary:hover { filter: brightness(1.1); }
+
+  #previewWrap { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel2); position: relative; }
+  #previewWrap img { display: block; width: 100%; }
+  #previewWrap .empty { padding: 26px 10px; text-align: center; color: var(--dim); }
+  #previewMeta { padding: 5px 10px; font-size: 11px; color: var(--dim); border-top: 1px solid var(--line); }
+
+  #foot { padding: 8px 14px; border-top: 1px solid var(--line); color: var(--dim); font-size: 11px; display: flex; justify-content: space-between; align-items: center; }
+  #foot .ok { color: #6fcf7a; } #foot .bad { color: #e8746d; }
+  #cursorInfo {
+    position: absolute; right: 10px; bottom: 8px; z-index: 950;
+    background: rgba(30,34,42,.88); border: 1px solid var(--line); border-radius: 6px;
+    padding: 4px 10px; font: 12px/1.5 Consolas, monospace; color: var(--txt);
+    pointer-events: none; width: 340px; text-align: right; white-space: nowrap; overflow: hidden;
+  }
+  #cursorInfo b { color: var(--acc); }
+  #toast {
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 2000;
+    background: rgba(30,34,42,.95); border: 1px solid var(--line); padding: 8px 18px; border-radius: 8px;
+    display: none; font-size: 13px;
+  }
+  /* 地图右上控件 */
+  .mapctl { position: absolute; top: 10px; right: 10px; z-index: 900; display: flex; gap: 6px; }
+  .leaflet-control-scale { margin-left: 350px !important; }   /* 避开左侧参数面板 */
+  .mapctl button { background: rgba(38,43,53,.92); }
+  .mapctl button.on { border-color: var(--acc); color: var(--acc); }
+  #searchbox {
+    position: absolute; top: 10px; right: 290px; z-index: 900;
+    background: rgba(38,43,53,.92); border: 1px solid var(--line); border-radius: 6px;
+    color: var(--txt); padding: 6px 10px; width: 300px; font: inherit;
+  }
+
+  /* 设置弹窗 */
+  #settingsModal { position: fixed; inset: 0; z-index: 3000; display: none; align-items: center; justify-content: center; }
+  .modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.55); }
+  .modal-dialog { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; width: 360px; box-shadow: 0 8px 40px rgba(0,0,0,.5); }
+  .modal-dialog h3 { margin: 0 0 10px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<input id="searchbox" placeholder="输入地名后回车定位（可带市名更准确）">
+<datalist id="sug"></datalist>
+<div class="mapctl">
+  <button id="btnVec" class="on" title="矢量道路">矢量</button>
+  <button id="btnImg" title="卫星影像">卫星</button>
+  <button id="btnBldg" title="建筑白膜覆盖层（z≥16 时显示，首次区域需生成缓存）">白膜</button>
+</div>
+
+<div id="panel">
+  <header>RealityMap</header>
+  <div id="body">
+
+    <div class="sec">
+      <h3>位置</h3>
+      <div class="row"><label>经度</label><input type="number" id="lng" step="0.0001"></div>
+      <div class="row"><label>纬度</label><input type="number" id="lat" step="0.0001"></div>
+      <div class="row"><label>旋转角 °</label><input type="number" id="angle" step="1" value="0"></div>
+      <div class="row">
+        <button id="btnProbe" style="flex:1">探测高程范围</button>
+        <button id="btnHere" style="flex:1">定位到选区</button>
+      </div>
+      <div class="row">
+        <input type="text" id="extent3857" readonly placeholder="选区范围 EPSG:3857（点击复制）" title="xmin,xmax,ymin,ymax [EPSG:3857] —— QGIS 范围格式" style="flex:1;cursor:pointer;font-family:Consolas,monospace;font-size:11px">
+        <button id="btnExtent" style="flex:0 0 auto">3857</button>
+      </div>
+      <div id="probe" class="hint">点击地图任意处移动选区中心</div>
+    </div>
+
+    <div class="sec">
+      <h3>尺寸</h3>
+      <div class="row"><label>范围方式</label>
+        <select id="selMode">
+          <option value="manual" selected>指定范围 km</option>
+          <option value="region">行政区</option>
+        </select>
+      </div>
+      <div class="row" id="rowManual"><label>真实范围 km</label><input type="number" id="sizeKm" step="0.5" value="57.344"></div>
+      <div class="row" id="rowRegion" style="display:none"><label>行政区名</label>
+        <input type="text" id="regionName" placeholder="如：某市 / 某区" style="flex:1">
+        <button id="btnRegionApply" style="flex:0 0 auto">框选</button>
+      </div>
+      <div class="btns" id="sizePresets">
+        <button data-km="5">5</button><button data-km="10">10</button>
+        <button data-km="17.28">17.28</button><button data-km="57.344">57.344</button>
+        <button data-km="229.376">229</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h3>输出</h3>
+      <div class="row"><label>目标格式</label>
+        <select id="format">
+          <option value="cs1" disabled>Cities: Skylines 1（未测）</option>
+          <option value="cs2" selected>Cities: Skylines 2</option>
+          <option value="unity" disabled>Unity（未测）</option>
+          <option value="ue" disabled>Unreal Engine（未测）</option>
+        </select>
+      </div>
+      <div class="row"><label>垂直放大 %</label><input type="number" id="heightScalePct" step="10" value="100"></div>
+    </div>
+
+    <div class="sec">
+      <h3>预览</h3>
+      <div class="btns">
+        <button id="btnPreview" class="primary" style="flex:1">生成预览</button>
+        <label style="display:flex;align-items:center;gap:4px;color:var(--dim)">
+          <input type="checkbox" id="autoPreview"> 自动
+        </label>
+      </div>
+      <div id="previewWrap"><div class="empty">预览：着色高程 + 山体阴影</div></div>
+      <div id="previewMeta"></div>
+    </div>
+
+    <div class="sec">
+      <h3>下载</h3>
+      <div class="btns col">
+        <button id="btnDlPng" class="primary">高度图+矢量+影像</button>
+        <button id="btnDlRaw" class="primary">RAW</button>
+        <button id="btnDlBldg" class="primary">建筑白膜 GeoJSON</button>
+        <button id="btnDlRoads" class="primary">路网 OSM XML</button>
+      </div>
+    </div>
+
+  </div>
+  <div id="foot"><span>状态：<span id="status">连接中…</span></span><button id="btnSettings">设置</button></div>
+</div>
+<div id="cursorInfo">移动鼠标查看坐标与海拔</div>
+<div id="toast"></div>
+
+<!-- 设置弹窗 -->
+<div id="settingsModal">
+  <div class="modal-backdrop"></div>
+  <div class="modal-dialog">
+    <h3>设置</h3>
+    <div class="row" id="rowCfgKey"><label>天地图 key</label><input type="password" id="cfgKey" placeholder="未配置" style="flex:1" autocomplete="off"></div>
+    <div class="row"><label>底图来源</label>
+      <select id="tileSource">
+        <option value="local">本地瓦片（离线）</option>
+        <option value="tianditu">天地图（在线）</option>
+      </select>
+    </div>
+    <div class="btns">
+      <button id="btnCancelSettings" style="flex:1">取消</button>
+      <button id="btnSaveSettings" class="primary" style="flex:1">保存</button>
+    </div>
+    <div class="hint">保存后写入 config.json，重启仍生效</div>
+  </div>
+</div>
+
+<script src="vendor/leaflet.js"></script>
+<script>
+"use strict";
+// ---------- 常量与工具 ----------
+const TILE_VER = "v=" + Date.now();         // 开发期缓存击穿
+const $ = id => document.getElementById(id);
+const fmtSpec = {
+  cs1: { def: 17.28, es: 1023.98 }, cs2: { def: 57.344, es: 4096 },
+  unity: { def: 17.28, es: 512 }, ue: { def: 17.28, es: 512 },
+};
+const mPerDegLat = lat => 111132.92 - 559.82 * Math.cos(2 * lat * Math.PI / 180);
+const mPerDegLon = lat => 111412.84 * Math.cos(lat * Math.PI / 180);
+function toast(msg, ms = 2600) {
+  const t = $("toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", ms);
+}
+
+// ---------- 状态（localStorage 持久化） ----------
+const KEYS = ["lng", "lat", "angle", "format", "sizeKm", "heightScalePct"];
+let S = { lng: 117.943, lat: 40.990, angle: 0, format: "cs2", sizeKm: 57.344,
+          heightScalePct: 100 };
+try { Object.assign(S, JSON.parse(localStorage.hmState || "{}")); } catch (e) {}
+function saveState() { localStorage.hmState = JSON.stringify(S); }
+function readUI() { for (const k of KEYS) { const v = $(k).value; S[k] = k === "format" ? v : parseFloat(v); } saveState(); }
+function writeUI() { for (const k of KEYS) $(k).value = S[k]; saveState(); }
+
+// ---------- 地图 ----------
+const WORLD = L.latLngBounds([[-85.05, -180], [85.05, 180]]);
+const map = L.map("map", { center: [S.lat, S.lng], zoom: 10, minZoom: 2,
+  preferCanvas: true, maxBounds: WORLD.pad(0.15), maxBoundsViscosity: 0.7, doubleClickZoom: false });
+L.control.scale({ imperial: false, maxWidth: 160 }).addTo(map);   // 真实地面比例尺（随纬度自动校准）
+const tOpt = { maxZoom: 20, noWrap: true, bounds: WORLD };
+// maxNativeZoom：超出天地图原生层级就放大最后一层、不再请求更高层（避免黑块）——QGIS 同款行为
+// 矢量/标注多数区域只供到 17；卫星到 18
+const vecLayer = L.tileLayer(`/tiles/vec/{z}/{x}/{y}.png?${TILE_VER}`, { ...tOpt, maxNativeZoom: 17 }).addTo(map);
+const cvaLayer = L.tileLayer(`/tiles/cva/{z}/{x}/{y}.png?${TILE_VER}`, { ...tOpt, maxNativeZoom: 17 }).addTo(map);
+const imgLayer = L.tileLayer(`/tiles/img/{z}/{x}/{y}.png?${TILE_VER}`, { ...tOpt, maxNativeZoom: 18 });
+$("btnVec").onclick = () => { map.removeLayer(imgLayer); vecLayer.addTo(map); cvaLayer.addTo(map);
+  $("btnVec").classList.add("on"); $("btnImg").classList.remove("on"); };
+$("btnImg").onclick = () => { map.removeLayer(vecLayer); map.removeLayer(cvaLayer); imgLayer.addTo(map);
+  $("btnImg").classList.add("on"); $("btnVec").classList.remove("on"); };
+
+// 设置弹窗：加载 + 保存（持久化到 config.json，重启仍生效）
+// 仅在线（tianditu）模式下才需要 key
+function updateKeyField() {
+  $("rowCfgKey").style.display = $("tileSource").value === "tianditu" ? "" : "none";
+}
+async function loadSettings() {
+  try {
+    const r = await fetch("/api/settings");
+    if (r.ok) {
+      const j = await r.json();
+      $("cfgKey").value = j.tianditu_key || "";
+      $("tileSource").value = j.tile_source || "local";
+      updateKeyField();
+    }
+  } catch (e) {}
+}
+$("tileSource").addEventListener("change", updateKeyField);
+function openSettings() {
+  $("settingsModal").style.display = "flex";
+  loadSettings();
+}
+function closeSettings() {
+  $("settingsModal").style.display = "none";
+}
+$("btnSettings").onclick = openSettings;
+$("btnCancelSettings").onclick = closeSettings;
+$("settingsModal").addEventListener("click", e => {
+  if (e.target.classList.contains("modal-backdrop")) closeSettings();
+});
+$("btnSaveSettings").onclick = async () => {
+  const btn = $("btnSaveSettings");
+  btn.disabled = true;
+  try {
+    const r = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tianditu_key: $("cfgKey").value.trim(),
+        tile_source: $("tileSource").value
+      })
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+    closeSettings();
+    toast("设置已保存，刷新地图…");
+    setTimeout(() => location.reload(), 600);   // 瓦片 URL 不变但来源变了，强刷避免浏览器读旧缓存
+  } catch (e) { toast("保存失败：" + e.message); }
+  finally { btn.disabled = false; }
+};
+
+// 选区（旋转正方形）与可玩区参考框
+let sel = null, worldBox = null;
+// 选区四角（旋转正方形，[lat, lng]）——drawSelection 与 updateExtent3857 共用
+function selectionCorners() {
+  const half = S.sizeKm * 500, a = S.angle * Math.PI / 180;
+  return [[-1,-1],[1,-1],[1,1],[-1,1]].map(([sx, sy]) => {
+    const rx = (sx * half * Math.cos(a) - sy * half * Math.sin(a)) / mPerDegLon(S.lat);
+    const ry = (sx * half * Math.sin(a) + sy * half * Math.cos(a)) / mPerDegLat(S.lat);
+    return [S.lat + ry, S.lng + rx];
+  });
+}
+function drawSelection() {
+  const pts = selectionCorners();
+  if (sel) sel.setLatLngs(pts);
+  else sel = L.polygon(pts, { color: "#f59e0b", weight: 2, fillOpacity: 0.05 }).addTo(map);
+  // 世界图范围（4×，虚线）
+  const wHalf = S.sizeKm * 2000;   // 4× half
+  const wLat = wHalf / mPerDegLat(S.lat), wLon = wHalf / mPerDegLon(S.lat);
+  const wb = [[S.lat - wLat, S.lng - wLon], [S.lat + wLat, S.lng + wLon]];
+  if (worldBox) worldBox.setBounds(wb);
+  else worldBox = L.rectangle(wb, { color: "#e8a33d", weight: 1, dashArray: "8 6",
+    fillOpacity: 0, interactive: false }).addTo(map);
+}
+
+// 选区范围 → EPSG:3857（Web 墨卡托），QGIS 范围格式 xmin,xmax,ymin,ymax
+const WEB_MERC_R = 6378137;
+const lonTo3857 = lon => WEB_MERC_R * lon * Math.PI / 180;
+const latTo3857 = lat => WEB_MERC_R * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360));
+function updateExtent3857() {
+  readUI();
+  const cs = selectionCorners();
+  let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+  for (const [lat, lon] of cs) {
+    if (lon < minLon) minLon = lon; if (lon > maxLon) maxLon = lon;
+    if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat;
+  }
+  $("extent3857").value =
+    `${lonTo3857(minLon).toFixed(2)},${lonTo3857(maxLon).toFixed(2)},` +
+    `${latTo3857(minLat).toFixed(2)},${latTo3857(maxLat).toFixed(2)}`;
+}
+function copyExtent() {
+  updateExtent3857();
+  const v = $("extent3857").value;
+  if (!v) return toast("无选区范围");
+  const done = () => toast("已复制 EPSG:3857 范围", 2000);
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(v).then(done, () => toast("复制失败"));
+  } else {
+    const ta = document.createElement("textarea");
+    ta.value = v; ta.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); done(); } catch (e) { toast("复制失败"); }
+    document.body.removeChild(ta);
+  }
+}
+$("extent3857").onclick = copyExtent;
+$("btnExtent").onclick = copyExtent;
+map.on("click", e => {
+  S.lng = +e.latlng.lng.toFixed(5); S.lat = +e.latlng.lat.toFixed(5); writeUI(); drawSelection(); if ($("autoPreview").checked) doPreview(); });
+$("btnHere").onclick = () => {
+  // 居中 + 尽量放大到刚好完整显示选区（左侧面板遮挡区域留白）
+  if (sel) map.fitBounds(sel.getBounds(), {
+    paddingTopLeft: [360, 20], paddingBottomRight: [20, 40], maxZoom: 18
+  });
+};
+
+// ---------- 地名搜索（服务端代理天地图；未配 key 时降级为坐标解析） ----------
+$("searchbox").addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
+$("searchbox").addEventListener("change", doSearch);
+let searching = false;
+async function doSearch() {
+  if (searching) return;
+  const q = $("searchbox").value.trim();
+  if (!q) return;
+  const m = q.match(/^(-?\d+(\.\d+)?)[,，\s]+(-?\d+(\.\d+)?)$/);
+  if (m) { S.lng = +m[1]; S.lat = +m[3]; writeUI(); drawSelection(); updateExtent3857(); $("btnHere").click(); return; }
+  searching = true;
+  $("searchbox").style.opacity = 0.5;
+  try {
+    const r = await fetch("/api/geocode?q=" + encodeURIComponent(q));
+    const list = r.ok ? await r.json() : [];
+    if (!list.length) { toast("天地图无此地名（试试带市名，如：某市 某景点）"); return; }
+    S.lng = list[0].lng; S.lat = list[0].lat; writeUI(); drawSelection(); updateExtent3857();
+    $("btnHere").click();
+    toast(`定位：${list[0].name || q} (${list[0].lng.toFixed(4)}, ${list[0].lat.toFixed(4)})`, 4000);
+  } catch (e) { toast("搜索失败：" + e.message); }
+  finally { searching = false; $("searchbox").style.opacity = 1; }
+}
+
+// ---------- API ----------
+async function api(path, body, binary = false) {
+  const r = await fetch(path, { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+  return binary ? r : r.json();
+}
+function params() { readUI(); return S; }
+
+async function refreshStatus() {
+  try {
+    const ping = await (await fetch("/api/ping")).json();
+    const info = await (await fetch("/api/dem/info")).json();
+    $("status").innerHTML = ping.status === "ok" && info.ready
+      ? `<span class="ok">就绪</span>`
+      : `<span class="bad">未就绪</span>`;
+  } catch (e) { $("status").innerHTML = `<span class="bad">服务不可达</span>`; }
+}
+
+// 探测
+$("btnProbe").onclick = async () => {
+  const p = params(); $("probe").textContent = "探测中…";
+  try {
+    const half = p.sizeKm * 500;
+    const b = [p.lng - half / mPerDegLon(p.lat), p.lat - half / mPerDegLat(p.lat),
+               p.lng + half / mPerDegLon(p.lat), p.lat + half / mPerDegLat(p.lat)];
+    const st = await api("/api/elevation/stats", { bbox: b });
+    $("probe").innerHTML = `选区高程：<b>${st.min?.toFixed(0) ?? "-"}</b> ~ <b>${st.max?.toFixed(0) ?? "-"}</b> m · 有效 ${(st.validRatio * 100).toFixed(0)}%`;
+  } catch (e) { $("probe").textContent = "探测失败：" + e.message; }
+};
+
+// 预览
+let previewToken = 0;
+async function doPreview() {
+  const tok = ++previewToken;
+  const p = params();
+  $("previewWrap").innerHTML = '<div class="empty">渲染中…</div>';
+  try {
+    const r = await fetch("/api/preview", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...p, format: p.format }) });
+    if (!r.ok) throw new Error(r.status);
+    if (tok !== previewToken) return;
+    const url = URL.createObjectURL(await r.blob());
+    $("previewWrap").innerHTML = `<img src="${url}">`;
+    $("previewMeta").textContent = `${p.sizeKm} km · ${p.format.toUpperCase()}`;
+  } catch (e) { $("previewWrap").innerHTML = `<div class="empty">失败：${e.message}</div>`; }
+}
+$("btnPreview").onclick = doPreview;
+
+// 下载
+async function download(r, name) {
+  const d = r.headers.get("Content-Disposition") || "";
+  const m = d.match(/filename="?([^";]+)"?/);
+  const blob = await r.blob();          // 先正确取出二进制（Response 不能直接当 BlobPart）
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = m ? m[1] : name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function dlHeightmap(exportType) {
+  const p = params();
+  const btns = [$("btnDlPng"), $("btnDlRaw")];
+  const orig = btns.map(b => b.textContent);
+  btns.forEach(b => { b.disabled = true; });
+  try {
+    const r0 = await fetch("/api/heightmap-async", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...p, export: exportType, mapZoom: Math.round(map.getZoom()) }) });
+    if (!r0.ok) throw new Error((await r0.json().catch(() => ({}))).error || r0.status);
+    const { jobId } = await r0.json();
+    let j;
+    for (;;) {
+      j = await (await fetch(`/api/job/${jobId}`)).json();
+      const txt = `${j.progress}% ${j.phase}`;
+      btns.forEach((b, i) => b.textContent = i === 0 ? txt : orig[i]);
+      $("foot").innerHTML = `生成中：<b>${j.progress}%</b> ${j.phase}（${(j.elapsedMs/1000).toFixed(0)}s）`;
+      if (j.status !== "running") break;
+      await sleep(800);
+    }
+    if (j.status === "error") throw new Error(j.error || "生成失败");
+    const res = await fetch(`/api/job/${jobId}/result`);
+    await download(res, "heightmap");
+    const mn = res.headers.get("X-Min-Elevation"), mx = res.headers.get("X-Max-Elevation");
+    toast(`完成：高程 ${mn ? (+mn).toFixed(0) + "~" + (+mx).toFixed(0) + "m，" : ""}钳顶 ${res.headers.get("X-Clipped-Pixels") || 0} px`);
+  } catch (e) { toast("失败：" + e.message); }
+  btns.forEach((b, i) => { b.disabled = false; b.textContent = orig[i]; });
+  refreshStatus();
+}
+$("btnDlPng").onclick = () => dlHeightmap("png");
+$("btnDlRaw").onclick = () => dlHeightmap("raw");
+$("btnDlBldg").onclick = async () => {
+  const p = params();
+  toast("提取建筑中…大范围约 1-3 分钟", 8000);
+  try {
+    const r0 = await fetch("/api/buildings-async", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bbox: (() => {
+        const half = p.sizeKm * 500;
+        return [p.lng - half / mPerDegLon(p.lat), p.lat - half / mPerDegLat(p.lat),
+                p.lng + half / mPerDegLon(p.lat), p.lat + half / mPerDegLat(p.lat)];
+      })() }) });
+    const { jobId } = await r0.json();
+    for (;;) {
+      const j = await (await fetch(`/api/job/${jobId}`)).json();
+      if (j.status !== "running") break;
+      await sleep(1500);
+    }
+    const res = await fetch(`/api/job/${jobId}/result`);
+    await download(res, "buildings.geojson");
+    toast("建筑 GeoJSON 完成");
+  } catch (e) { toast("失败：" + e.message); }
+};
+$("btnDlRoads").onclick = async () => {
+  const p = params();
+  toast("提取路网中…约 1-2 分钟", 8000);
+  try {
+    const half = p.sizeKm * 500;
+    const bbox = [p.lng - half / mPerDegLon(p.lat), p.lat - half / mPerDegLat(p.lat),
+                  p.lng + half / mPerDegLon(p.lat), p.lat + half / mPerDegLat(p.lat)];
+    const r0 = await fetch("/api/roads-async", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bbox }) });
+    const { jobId } = await r0.json();
+    for (;;) {
+      const j = await (await fetch(`/api/job/${jobId}`)).json();
+      if (j.status !== "running") break;
+      await sleep(1500);
+    }
+    const res = await fetch(`/api/job/${jobId}/result`);
+    await download(res, "roads.osm");
+    toast("路网 OSM XML 完成");
+  } catch (e) { toast("失败：" + e.message); }
+};
+// 尺寸预设与格式切换
+document.querySelectorAll("#sizePresets button").forEach(b =>
+  b.onclick = () => { $("sizeKm").value = b.dataset.km; drawSelection(); });
+$("format").onchange = () => { const f = $("format").value; $("sizeKm").value = fmtSpec[f].def; };
+
+// 输入联动
+KEYS.forEach(k => $(k).addEventListener("change", () => { drawSelection(); updateExtent3857(); if ($("autoPreview").checked) doPreview(); }));
+map.on("click", () => setTimeout(updateExtent3857, 50));
+
+// ---------- 行政区选区（左侧面板） ----------
+$("selMode").onchange = () => {
+  const region = $("selMode").value === "region";
+  $("rowManual").style.display = region ? "none" : "";
+  $("rowRegion").style.display = region ? "" : "none";
+};
+$("btnRegionApply").onclick = async () => {
+  const q = $("regionName").value.trim();
+  if (!q) return toast("输入行政区全名，如：某市");
+  $("btnRegionApply").style.opacity = 0.5;
+  try {
+    const list = await (await fetch("/api/region?q=" + encodeURIComponent(q))).json();
+    if (!list.length) return toast("未匹配到行政区（用全名，如：某市/某区）");
+    const r = list[0];
+    S.lng = (r.bbox[0] + r.bbox[2]) / 2;
+    S.lat = (r.bbox[1] + r.bbox[3]) / 2;
+    S.sizeKm = r.spanKm;
+    S.angle = 0;
+    writeUI(); drawSelection(); updateExtent3857();
+    map.fitBounds([[r.bbox[1], r.bbox[0]], [r.bbox[3], r.bbox[2]]],
+                  { paddingTopLeft: [360, 20], paddingBottomRight: [20, 40] });
+    const more = list.length > 1 ? `（另匹配到 ${list[1].name}，搜索全名可选）` : "";
+    toast(`已框选：${r.name} · ${r.spanKm}km 选区${more}`, 5000);
+  } catch (e) { toast("失败：" + e.message); }
+  finally { $("btnRegionApply").style.opacity = 1; }
+};
+
+// ---------- 光标坐标 + 海拔（右下角） ----------
+let curLng = null, curLat = null, curElev, elevSeq = 0, elevTimer = null;
+function renderCursorInfo() {
+  if (curLng === null) return;
+  const elevTxt = curElev === undefined ? "…"
+    : (curElev === null ? "无数据" : `海拔 <b>${Math.round(curElev)}m</b>`);
+  $("cursorInfo").innerHTML =
+    `${curLng.toFixed(6)}°E, ${curLat.toFixed(6)}°N · z${map.getZoom().toFixed(1)} · ${elevTxt}`;
+}
+map.on("mousemove", e => {
+  curLng = e.latlng.lng; curLat = e.latlng.lat; curElev = undefined;
+  renderCursorInfo();
+  clearTimeout(elevTimer);
+  elevTimer = setTimeout(() => {
+    const lng = curLng, lat = curLat, seq = ++elevSeq;
+    fetch(`/api/elevation/point?lng=${lng}&lat=${lat}`)
+      .then(r => r.json())
+      .then(j => { if (seq === elevSeq) { curElev = j.elev; renderCursorInfo(); } })
+      .catch(() => { if (seq === elevSeq) { curElev = null; renderCursorInfo(); } });
+  }, 150);
+});
+map.on("mouseout", () => {
+  curLng = null; curLat = null; curElev = undefined;
+  clearTimeout(elevTimer);
+  $("cursorInfo").textContent = "移动鼠标查看坐标与海拔";
+});
+// 滚轮缩放不触发 mousemove，但会改变 zoom，这里单独刷新缩放级别显示
+map.on("zoomend", () => renderCursorInfo());
+
+
+
+// ---------- 建筑白膜覆盖层 ----------
+let bldgOn = false, bldgLayer = null, bldgGenerating = false;
+$("btnBldg").onclick = async () => {
+  bldgOn = !bldgOn;
+  $("btnBldg").classList.toggle("on", bldgOn);
+  if (bldgOn) { await loadBuildings(); } else { clearBuildings(); }
+};
+function clearBuildings() {
+  if (bldgLayer) { map.removeLayer(bldgLayer); bldgLayer = null; }
+}
+async function loadBuildings() {
+  if (!bldgOn) return;
+  if (map.getZoom() < 16) { toast("白膜需 z≥16（当前 z" + map.getZoom().toFixed(1) + "）"); return; }
+  const b = map.getBounds();
+  const cells = [];
+  const step = 0.05;
+  for (let ws = Math.floor(b.getWest() / step) * step; ws < b.getEast(); ws += step)
+    for (let ss = Math.floor(b.getSouth() / step) * step; ss < b.getNorth(); ss += step)
+      cells.push([+ws.toFixed(3), +ss.toFixed(3)]);
+  if (cells.length > 24) { toast("范围过大（>24 格），请放大"); return; }
+  const feats = [];
+  const missing = [];
+  for (const [w, s] of cells) {
+    try {
+      const r = await fetch(`/api/buildings-cell?w=${w}&s=${s}`);
+      if (r.ok) {
+        const gj = await r.json();
+        feats.push(...gj.features);
+      } else if (r.status === 404) {
+        missing.push([w, s]);
+      }
+    } catch (e) {}
+  }
+  renderBuildings(feats);
+  // 未缓存的格子 → 后台生成（下次打开秒出）
+  if (missing.length > 0 && !bldgGenerating) {
+    bldgGenerating = true;
+    toast(`白膜：${feats.length} 栋已显示，${missing.length} 格后台生成中（约 40s/格）`, 6000);
+    (async () => {
+      for (const [w, s] of missing.slice(0, 4)) {
+        try {
+          const r0 = await fetch("/api/buildings-async", { method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ bbox: [w, s, +(w + 0.05).toFixed(3), +(s + 0.05).toFixed(3)] }) });
+          const { jobId } = await r0.json();
+          for (;;) {
+            await sleep(2000);
+            const j = await (await fetch(`/api/job/${jobId}`)).json();
+            if (j.status !== "running") break;
+          }
+        } catch (e) {}
+      }
+      bldgGenerating = false;
+    })();
+  }
+}
+function renderBuildings(feats) {
+  clearBuildings();
+  if (!feats.length) return;
+  bldgLayer = L.geoJSON({ type: "FeatureCollection", features: feats }, {
+    style: f => {
+      const h = f.properties.height || 10;
+      return { color: "#fff", weight: 0.5, opacity: 0.7,
+               fillColor: "#fff", fillOpacity: Math.min(0.25 + h / 100, 0.65) };
+    },
+    pane: "overlayPane"
+  }).addTo(map);
+  toast(`白膜：${feats.length} 栋`);
+}
+map.on("moveend zoomend", () => { if (bldgOn) loadBuildings(); });
+
+// ---------- 启动 ----------
+writeUI(); drawSelection(); updateExtent3857(); refreshStatus(); loadSettings();
+setInterval(refreshStatus, 30000);
+</script>
+</body>
+</html>

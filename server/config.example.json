@@ -1,0 +1,14 @@
+{
+  "host": "127.0.0.1",
+  "port": 8300,
+  "data_root": "D:/data",
+  "tile_layers": {
+    "vec": "vec_tiles",
+    "cva": "cva",
+    "img": "img_tiles"
+  },
+  "dem_dir": "DEM",
+  "tianditu_key": "",
+  "geocode_enabled": true,
+  "tile_source": "local"
+}

@@ -1,0 +1,38 @@
+# 构建产物
+build/
+out/
+cmake-build-*/
+dist/
+
+# 前端
+web/node_modules/
+web/dist/
+
+# IDE / 编辑器
+.vscode/
+.idea/
+.vs/
+*.user
+*.suo
+
+# 本地配置
+server/config.json
+server/config.local.json
+
+docs/gscloud-download.md
+docs/osm-download.md
+
+scripts/vcpkg_mirror.sh
+
+# 运行期产物 / 日志
+*.log
+*.flag
+tmp-*
+
+# 数据工具（本地自用，不上传）
+tools/
+
+# 系统杂物
+Thumbs.db
+.DS_Store
+*~
